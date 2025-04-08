@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi import FastAPI, Request, HTTPException, Security, Depends # Import Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -103,27 +103,29 @@ app.include_router(slack_router)
 
 @app.post("/api/mcp-agent-army", response_model=AgentResponse)
 async def mcp_agent_army(
-    request: AgentRequest,
+    agent_request: AgentRequest, # Rename incoming data model
+    request: Request,           # Add FastAPI Request object
     authenticated: bool = Depends(verify_token)
 ):
-    print(f"🔍 Received request for session_id: {request.session_id}, request_id: {request.request_id}, query: '{request.query}'") # ADDED DEBUG LOG + query
+    # Use agent_request for data, request for app state
+    print(f"🔍 Received request for session_id: {agent_request.session_id}, request_id: {agent_request.request_id}, query: '{agent_request.query}'") # Use agent_request
 
     # --- Quick Response Logic ---
-    normalized_query = request.query.strip().lower()
+    normalized_query = agent_request.query.strip().lower() # Use agent_request
     greetings = ["hello", "hi", "hey", "hola", "yo", "sup"]
     if normalized_query in greetings:
         print("Greeting detected, sending quick response.")
-        quick_response = f"Hello there, {request.user_id}!"
+        quick_response = f"Hello there, {agent_request.user_id}!" # Use agent_request
         # Store user query and quick response
-        await store_message(session_id=request.session_id, message_type="human", content=request.query)
-        await store_message(session_id=request.session_id, message_type="ai", content=quick_response, data={"request_id": request.request_id, "quick_response": True})
+        await store_message(session_id=agent_request.session_id, message_type="human", content=agent_request.query) # Use agent_request
+        await store_message(session_id=agent_request.session_id, message_type="ai", content=quick_response, data={"request_id": agent_request.request_id, "quick_response": True}) # Use agent_request
         return AgentResponse(success=True) # Note: We might want a different response structure later
     # --- End Quick Response Logic ---
 
     try:
         # Fetch conversation history
-        print(f"Fetching history for session_id: {request.session_id}") # ADDED DEBUG LOG
-        conversation_history = await fetch_conversation_history(request.session_id)
+        print(f"Fetching history for session_id: {agent_request.session_id}") # Use agent_request
+        conversation_history = await fetch_conversation_history(agent_request.session_id) # Use agent_request
         print(f"Fetched {len(conversation_history)} messages from history.") # ADDED DEBUG LOG
         
         # Convert conversation history to format expected by agent
@@ -136,37 +138,41 @@ async def mcp_agent_army(
             messages.append(msg)
 
         # Store user's query
-        print(f"Storing user query for session_id: {request.session_id}") # ADDED DEBUG LOG
+        print(f"Storing user query for session_id: {agent_request.session_id}") # Use agent_request
         await store_message(
-            session_id=request.session_id,
+            session_id=agent_request.session_id, # Use agent_request
             message_type="human",
-            content=request.query
+            content=agent_request.query # Use agent_request
         )
         print(f"User query stored. Running primary agent...") # ADDED DEBUG LOG
 
-        # Get agent from app state
+        # Get agent from app state using the FastAPI Request object
         agent = request.app.state.primary_agent
+        if not agent:
+             print("Error: Primary agent not found in app state.")
+             raise HTTPException(status_code=500, detail="Agent not initialized")
+
 
         # Run the agent with conversation history
         result = await agent.run(
-            request.query,
+            agent_request.query, # Use agent_request
             message_history=messages
         )
 
         # Store agent's response
         await store_message(
-            session_id=request.session_id,
+            session_id=agent_request.session_id, # Use agent_request
             message_type="ai",
             content=result.data,
-            data={"request_id": request.request_id}
+            data={"request_id": agent_request.request_id} # Use agent_request
         )
         print(f"Agent response stored. Request successful.") # ADDED DEBUG LOG
 
         # Update memories based on the last user message and agent response
         memory_messages = [
-            {"role": "user", "content": request.query},
+            {"role": "user", "content": agent_request.query}, # Use agent_request
             {"role": "assistant", "content": result.data}
-        ]   
+        ]
 
         return AgentResponse(success=True)
 
@@ -174,10 +180,10 @@ async def mcp_agent_army(
         print(f"Error processing agent request: {str(e)}")
         # Store error message in conversation
         await store_message(
-            session_id=request.session_id,
+            session_id=agent_request.session_id, # Use agent_request
             message_type="ai",
             content="I apologize, but I encountered an error processing your request.",
-            data={"error": str(e), "request_id": request.request_id}
+            data={"error": str(e), "request_id": agent_request.request_id} # Use agent_request
         )
         print(f"Error handled and stored. Returning success=False.") # ADDED DEBUG LOG
         return AgentResponse(success=False)
