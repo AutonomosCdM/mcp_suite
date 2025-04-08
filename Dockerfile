@@ -40,4 +40,4 @@ ENV PATH="/app/venv/bin:$PATH"
 EXPOSE ${PORT}
 
 # Command to run the application using the venv python
-CMD ["sh", "-c", "uvicorn mcp_agent_army_endpoint:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["uvicorn", "mcp_agent_army_endpoint:app", "--host", "0.0.0.0", "--port", "${PORT}"]

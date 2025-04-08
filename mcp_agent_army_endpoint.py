@@ -53,6 +53,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add a simple root endpoint for health check / basic testing
+@app.get("/")
+async def read_root():
+    print("🔍 Received request for root /")
+    return {"status": "ok", "message": "MCP Agent Army Endpoint is running!"}
+
 # Supabase setup
 supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
