@@ -3,13 +3,13 @@ import time
 import hmac
 import hashlib
 import json
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks # Import BackgroundTasks
 from fastapi.responses import JSONResponse
 from slack_sdk.web.async_client import AsyncWebClient # Use async client
 from slack_sdk.errors import SlackApiError
+from pydantic_ai import Agent # Import Agent for type hinting
 
-# Import shared utilities and agent access
-# Assuming the main app instance is accessible via request.app.state
+# Import shared utilities
 from supabase_utils import fetch_conversation_history, store_message
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
 
@@ -58,9 +58,97 @@ async def verify_slack_signature(request: Request) -> bool:
 
     return hmac.compare_digest(my_signature, slack_signature)
 
+# --- Background Task for Processing ---
+async def process_slack_event(
+    text: str,
+    user_id: str,
+    channel: str,
+    session_id: str,
+    request_id: str,
+    primary_agent: Agent, # Pass the agent instance
+    slack_client: AsyncWebClient | None # Pass the slack client instance
+):
+    """Handles the actual processing of the Slack message in the background."""
+    print(f"Background task started for request_id: {request_id}")
+
+    # --- Quick Greeting Logic ---
+    normalized_query = text.lower()
+    greetings = ["hello", "hi", "hey", "hola", "yo", "sup"]
+    if normalized_query in greetings:
+        print("Greeting detected (background), sending quick response to Slack.")
+        quick_response = f"Hello there <@{user_id}>!"
+        try:
+            # Store user query and quick response
+            await store_message(session_id=session_id, message_type="human", content=text)
+            await store_message(session_id=session_id, message_type="ai", content=quick_response, data={"request_id": request_id, "quick_response": True})
+            if slack_client:
+                await slack_client.chat_postMessage(channel=channel, text=quick_response)
+                print("Quick response sent to Slack.")
+            else:
+                 print("Error: Slack client not initialized, cannot send quick response.")
+        except Exception as e:
+            print(f"Error during background quick response handling: {e}")
+        return # End processing for greetings
+    # --- End Quick Response Logic ---
+
+    # --- Full Agent Processing ---
+    try:
+        # Fetch history
+        print(f"Fetching history for session_id: {session_id} (background)")
+        conversation_history = await fetch_conversation_history(session_id)
+        print(f"Fetched {len(conversation_history)} messages (background).")
+
+         # Convert conversation history to format expected by agent
+        messages = []
+        for msg in conversation_history:
+            msg_data = msg["message"]
+            msg_type = msg_data["type"]
+            msg_content = msg_data["content"]
+            # Ensure content is string, handle potential non-string data if necessary
+            if isinstance(msg_content, str):
+                 msg_obj = ModelRequest(parts=[UserPromptPart(content=msg_content)]) if msg_type == "human" else ModelResponse(parts=[TextPart(content=msg_content)])
+                 messages.append(msg_obj)
+            else:
+                 print(f"Warning: Skipping message with non-string content: {msg_content}")
+
+        # Store incoming user message (already stored before starting background task usually, but maybe store again here for atomicity?)
+        # Let's assume storing before background task is sufficient for now. If issues arise, reconsider.
+        # print(f"Storing user message for session_id: {session_id} (background)")
+        # await store_message(session_id=session_id, message_type="human", content=text)
+
+        # Run the agent
+        print(f"Running primary agent for query: '{text}' (background)")
+        result = await primary_agent.run(text, message_history=messages)
+        response_text = result.data if hasattr(result, "data") else str(result)
+        print(f"Agent returned response: '{response_text}' (background)")
+
+        # Store agent response
+        await store_message(session_id=session_id, message_type="ai", content=response_text, data={"request_id": request_id})
+
+        # Send response back to Slack
+        if slack_client:
+            await slack_client.chat_postMessage(channel=channel, text=response_text)
+            print("Agent response sent to Slack.")
+        else:
+            print("Error: Slack client not initialized, cannot send agent response.")
+
+    except SlackApiError as e:
+        print(f"Slack API Error during background processing: {e.response['error']}")
+    except HTTPException as e:
+         # If Supabase utils raise HTTPException, log it
+         print(f"HTTPException during background processing: {e.detail}")
+    except Exception as e:
+        print(f"General error during background processing: {e}")
+        # Try to send a generic error message back to Slack
+        if slack_client:
+            try:
+                await slack_client.chat_postMessage(channel=channel, text="Sorry, I encountered an error processing your request.")
+            except SlackApiError as slack_err:
+                 print(f"Failed to send error message to Slack: {slack_err.response['error']}")
+
 # --- Slack Events Endpoint ---
 @router.post("/slack/events")
-async def slack_events(request: Request):
+async def slack_events(request: Request, background_tasks: BackgroundTasks): # Add BackgroundTasks
     # Verify signature first
     if not await verify_slack_signature(request):
          print("Signature verification failed!") # Add log for failure
@@ -69,8 +157,10 @@ async def slack_events(request: Request):
          print("Signature verification successful!") # Add log for success
 
     # Need to parse body after verification uses the raw body
+    # Read body once for verification and parsing
+    body_bytes = await request.body()
     try:
-        payload = await request.json()
+        payload = json.loads(body_bytes)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
@@ -93,88 +183,26 @@ async def slack_events(request: Request):
 
             print(f"Received message from user {user_id} in channel {channel}: '{text}'")
 
-            # --- Quick Greeting Logic ---
-            normalized_query = text.lower()
-            greetings = ["hello", "hi", "hey", "hola", "yo", "sup"]
-            if normalized_query in greetings:
-                print("Greeting detected, sending quick response to Slack.")
-                quick_response = f"Hello there <@{user_id}>!"
-                try:
-                    # Store user query and quick response
-                    await store_message(session_id=session_id, message_type="human", content=text)
-                    await store_message(session_id=session_id, message_type="ai", content=quick_response, data={"request_id": request_id, "quick_response": True})
-                    if slack_client:
-                        await slack_client.chat_postMessage(channel=channel, text=quick_response)
-                    else:
-                         print("Error: Slack client not initialized, cannot send response.")
-                except Exception as e:
-                    print(f"Error during quick response handling: {e}")
-                # Acknowledge the event even if storing/sending fails
-                return JSONResponse(content={"ok": True})
-            # --- End Quick Response Logic ---
+            # Get the shared agent instance from app state
+            primary_agent_instance = request.app.state.primary_agent
+            if not primary_agent_instance:
+                 print("Error: Primary agent not found in app state. Cannot process event.")
+                 # Acknowledge Slack, but log the error server-side
+                 return JSONResponse(content={"ok": True})
 
-            # --- Full Agent Processing ---
-            try:
-                # Fetch history
-                print(f"Fetching history for session_id: {session_id}")
-                conversation_history = await fetch_conversation_history(session_id)
-                print(f"Fetched {len(conversation_history)} messages.")
+            # Schedule the processing to run in the background
+            background_tasks.add_task(
+                process_slack_event,
+                text=text,
+                user_id=user_id,
+                channel=channel,
+                session_id=session_id,
+                request_id=request_id,
+                primary_agent=primary_agent_instance,
+                slack_client=slack_client
+            )
+            print(f"Scheduled background task for request_id: {request_id}")
 
-                 # Convert conversation history to format expected by agent
-                messages = []
-                for msg in conversation_history:
-                    msg_data = msg["message"]
-                    msg_type = msg_data["type"]
-                    msg_content = msg_data["content"]
-                    # Ensure content is string, handle potential non-string data if necessary
-                    if isinstance(msg_content, str):
-                         msg_obj = ModelRequest(parts=[UserPromptPart(content=msg_content)]) if msg_type == "human" else ModelResponse(parts=[TextPart(content=msg_content)])
-                         messages.append(msg_obj)
-                    else:
-                         print(f"Warning: Skipping message with non-string content: {msg_content}")
-
-
-                # Store incoming user message
-                print(f"Storing user message for session_id: {session_id}")
-                await store_message(session_id=session_id, message_type="human", content=text)
-
-                # Get the shared agent instance from app state
-                primary_agent = request.app.state.primary_agent
-                if not primary_agent:
-                     raise HTTPException(status_code=500, detail="Primary agent not initialized")
-
-                # Run the agent
-                print(f"Running primary agent for query: '{text}'")
-                result = await primary_agent.run(text, message_history=messages)
-                response_text = result.data if hasattr(result, "data") else str(result)
-                print(f"Agent returned response: '{response_text}'")
-
-                # Store agent response
-                await store_message(session_id=session_id, message_type="ai", content=response_text, data={"request_id": request_id})
-
-                # Send response back to Slack
-                if slack_client:
-                    await slack_client.chat_postMessage(channel=channel, text=response_text)
-                    print("Response sent to Slack.")
-                else:
-                    print("Error: Slack client not initialized, cannot send response.")
-
-            except SlackApiError as e:
-                print(f"Slack API Error during processing: {e.response['error']}")
-                # Optionally send error to Slack if possible, but avoid loops
-            except HTTPException as e:
-                 # If Supabase utils raise HTTPException, log it but acknowledge Slack event
-                 print(f"HTTPException during processing: {e.detail}")
-            except Exception as e:
-                print(f"General error processing Slack event: {e}")
-                # Try to send a generic error message back to Slack
-                if slack_client:
-                    try:
-                        await slack_client.chat_postMessage(channel=channel, text="Sorry, I encountered an error processing your request.")
-                    except SlackApiError as slack_err:
-                         print(f"Failed to send error message to Slack: {slack_err.response['error']}")
-                # Acknowledge the event even if processing failed
-                return JSONResponse(content={"ok": True})
-
-    # Acknowledge other event types or successfully processed messages
+    # Acknowledge Slack immediately for all valid event_callbacks we don't explicitly ignore
+    # or that have been scheduled for background processing.
     return JSONResponse(content={"ok": True})
