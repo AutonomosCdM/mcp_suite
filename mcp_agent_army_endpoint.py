@@ -128,7 +128,20 @@ async def mcp_agent_army(
     request: AgentRequest,
     authenticated: bool = Depends(verify_token)
 ):
-    print(f"🔍 Received request for session_id: {request.session_id}, request_id: {request.request_id}") # ADDED DEBUG LOG
+    print(f"🔍 Received request for session_id: {request.session_id}, request_id: {request.request_id}, query: '{request.query}'") # ADDED DEBUG LOG + query
+
+    # --- Quick Response Logic ---
+    normalized_query = request.query.strip().lower()
+    greetings = ["hello", "hi", "hey", "hola", "yo", "sup"]
+    if normalized_query in greetings:
+        print("Greeting detected, sending quick response.")
+        quick_response = f"Hello there, {request.user_id}!"
+        # Store user query and quick response
+        await store_message(session_id=request.session_id, message_type="human", content=request.query)
+        await store_message(session_id=request.session_id, message_type="ai", content=quick_response, data={"request_id": request.request_id, "quick_response": True})
+        return AgentResponse(success=True) # Note: We might want a different response structure later
+    # --- End Quick Response Logic ---
+
     try:
         # Fetch conversation history
         print(f"Fetching history for session_id: {request.session_id}") # ADDED DEBUG LOG
