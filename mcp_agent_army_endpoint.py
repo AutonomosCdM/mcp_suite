@@ -122,9 +122,12 @@ async def mcp_agent_army(
     request: AgentRequest,
     authenticated: bool = Depends(verify_token)
 ):
+    print(f"🔍 Received request for session_id: {request.session_id}, request_id: {request.request_id}") # ADDED DEBUG LOG
     try:
         # Fetch conversation history
+        print(f"Fetching history for session_id: {request.session_id}") # ADDED DEBUG LOG
         conversation_history = await fetch_conversation_history(request.session_id)
+        print(f"Fetched {len(conversation_history)} messages from history.") # ADDED DEBUG LOG
         
         # Convert conversation history to format expected by agent
         messages = []
@@ -136,11 +139,13 @@ async def mcp_agent_army(
             messages.append(msg)
 
         # Store user's query
+        print(f"Storing user query for session_id: {request.session_id}") # ADDED DEBUG LOG
         await store_message(
             session_id=request.session_id,
             message_type="human",
             content=request.query
-        )        
+        )
+        print(f"User query stored. Running primary agent...") # ADDED DEBUG LOG
 
         # Run the agent with conversation history
         result = await primary_agent.run(
@@ -155,6 +160,7 @@ async def mcp_agent_army(
             content=result.data,
             data={"request_id": request.request_id}
         )
+        print(f"Agent response stored. Request successful.") # ADDED DEBUG LOG
 
         # Update memories based on the last user message and agent response
         memory_messages = [
@@ -173,6 +179,7 @@ async def mcp_agent_army(
             content="I apologize, but I encountered an error processing your request.",
             data={"error": str(e), "request_id": request.request_id}
         )
+        print(f"Error handled and stored. Returning success=False.") # ADDED DEBUG LOG
         return AgentResponse(success=False)
 
 if __name__ == "__main__":
