@@ -27,7 +27,8 @@ else:
     slack_client = AsyncWebClient(token=SLACK_BOT_TOKEN)
 
 # --- HMAC Signature Verification ---
-async def verify_slack_signature(request: Request) -> bool:
+# Modified to accept body bytes as argument
+async def verify_slack_signature(request: Request, body_bytes: bytes) -> bool:
     """Verifies the request signature using the Slack signing secret."""
     if not SLACK_SIGNING_SECRET:
         print("Error: SLACK_SIGNING_SECRET not configured.")
@@ -35,7 +36,7 @@ async def verify_slack_signature(request: Request) -> bool:
 
     timestamp = request.headers.get("X-Slack-Request-Timestamp")
     slack_signature = request.headers.get("X-Slack-Signature")
-    body = await request.body() # Read body only once
+    # body = await request.body() # Body is now passed as argument
 
     if not timestamp or not slack_signature:
         print("Warning: Missing Slack signature headers.")
@@ -49,7 +50,8 @@ async def verify_slack_signature(request: Request) -> bool:
         print("Warning: Invalid Slack timestamp header.")
         return False # Invalid timestamp format
 
-    sig_basestring = f"v0:{timestamp}:{body.decode('utf-8')}"
+    # Use the passed body_bytes
+    sig_basestring = f"v0:{timestamp}:{body_bytes.decode('utf-8')}"
     my_signature = 'v0=' + hmac.new(
         SLACK_SIGNING_SECRET.encode('utf-8'), # Ensure bytes
         sig_basestring.encode('utf-8'),      # Ensure bytes
@@ -149,16 +151,17 @@ async def process_slack_event(
 # --- Slack Events Endpoint ---
 @router.post("/slack/events")
 async def slack_events(request: Request, background_tasks: BackgroundTasks): # Add BackgroundTasks
-    # Verify signature first
-    if not await verify_slack_signature(request):
+    # Read body ONCE
+    body_bytes = await request.body()
+
+    # Verify signature first, passing the body
+    if not await verify_slack_signature(request, body_bytes):
          print("Signature verification failed!") # Add log for failure
          raise HTTPException(status_code=401, detail="Invalid Slack signature")
     else:
          print("Signature verification successful!") # Add log for success
 
-    # Need to parse body after verification uses the raw body
-    # Read body once for verification and parsing
-    body_bytes = await request.body()
+    # Parse body now that signature is verified
     try:
         payload = json.loads(body_bytes)
     except json.JSONDecodeError:
