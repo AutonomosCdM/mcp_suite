@@ -9,8 +9,13 @@ WORKDIR /app
 # Copy the application code
 COPY . .
 
-# Install the Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Node.js, npm (which includes npx), and Python dependencies
+RUN apt-get update && \
+    apt-get install -y nodejs npm --no-install-recommends && \
+    npm install -g npx && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Expose the port from build argument
 EXPOSE ${PORT}
