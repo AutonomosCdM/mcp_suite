@@ -86,7 +86,7 @@ brave_server = MCPServerStdio(
 # Filesystem MCP server
 # Note: LOCAL_FILE_DIR needs to be valid within the container
 filesystem_server = MCPServerStdio(
-    'npx', ['@modelcontextprotocol/server-filesystem', os.getenv("LOCAL_FILE_DIR", "/app/local_files")], # Removed -y, added default dir
+    'npx', ['@modelcontextprotocol/server-filesystem', os.getenv("LOCAL_FILE_DIR", "/app/local_files")], # Use /app/local_files as default
     env={} # No specific env needed for filesystem server itself
 )
 
