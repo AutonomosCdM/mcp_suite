@@ -98,6 +98,11 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 # Environments
 .env
 .venv
