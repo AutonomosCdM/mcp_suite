@@ -9,11 +9,17 @@ WORKDIR /app
 # Copy the application code
 COPY . .
 
-# Install Node.js, npm (which includes npx), and Python dependencies
+# Install dependencies for adding NodeSource repo and Python dependencies
 RUN apt-get update && \
-    apt-get install -y nodejs npm --no-install-recommends && \
-    npm install -g npx && \
+    apt-get install -y curl gnupg --no-install-recommends && \
+    # Add NodeSource repository for Node.js v18.x
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    # Install Node.js v18 (which includes npm and npx)
+    apt-get install -y nodejs --no-install-recommends && \
+    # Install Python dependencies
     pip install --no-cache-dir -r requirements.txt && \
+    # Clean up
+    apt-get purge -y --auto-remove curl gnupg && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
