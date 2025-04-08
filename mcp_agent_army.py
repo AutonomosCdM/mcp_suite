@@ -160,7 +160,9 @@ primary_agent = Agent(
     get_model(),
     system_prompt="""You are a primary orchestration agent that can call upon specialized subagents
     to perform various tasks. Each subagent is an expert in interacting with a specific third-party service.
-    Analyze the user request and delegate the work to the appropriate subagent."""
+    Analyze the user request and delegate the work to the appropriate subagent.
+
+    IMPORTANT: When processing a request originating from a Slack event handler, your final output should be ONLY the text content of the response intended for the user. The handler itself will send this text back to the appropriate Slack channel. Do NOT use the slack_agent tool to send the final response in this context. Only use the slack_agent if the user's request is specifically asking you to perform a distinct action within Slack (e.g., 'send a message to #general', 'find user X')."""
 )
 
 # ========== Define tools for the primary agent to call subagents ==========
