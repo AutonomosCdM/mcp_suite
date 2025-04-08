@@ -23,23 +23,26 @@ from mcp_agent_army import get_mcp_agent_army
 # Load environment variables
 load_dotenv()
 
-primary_agent = None
-mcp_stack = None
+# Remove global variables for agent/stack
+# primary_agent = None
+# mcp_stack = None
 
 # Define a lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: initialize resources
-    global primary_agent
-    global mcp_stack
-    
-    # Initialize the primary agent and get the stack that keeps MCP servers alive
-    primary_agent, mcp_stack = await get_mcp_agent_army()
-    
+    print("Lifespan: Initializing MCP Agent Army...")
+    agent, stack = await get_mcp_agent_army()
+    app.state.primary_agent = agent # Store agent in app state
+    app.state.mcp_stack = stack     # Store stack in app state (needed for cleanup)
+    print("Lifespan: MCP Agent Army Initialized.")
+
     yield
-    
+
     # Cleanup: close the MCP servers when the application shuts down
-    await mcp_stack.aclose()
+    print("Lifespan: Shutting down MCP servers...")
+    await app.state.mcp_stack.aclose()
+    print("Lifespan: MCP servers shut down.")
 
 # Initialize FastAPI app
 app = FastAPI(lifespan=lifespan)
@@ -59,11 +62,14 @@ async def read_root():
     print("🔍 Received request for root /")
     return {"status": "ok", "message": "MCP Agent Army Endpoint is running!"}
 
-# Supabase setup
-supabase: Client = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_SERVICE_KEY")
-)
+# Remove Supabase setup here, it's moved to supabase_utils.py
+# supabase: Client = create_client(...)
+
+# Import shared Supabase functions
+from supabase_utils import fetch_conversation_history, store_message
+
+# Import the Slack event router
+from slack_event_handler import router as slack_router
 
 # Request/Response Models
 class AgentRequest(BaseModel):
@@ -88,40 +94,12 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
             status_code=401,
             detail="Invalid authentication token"
         )
-    return True    
+    return True
 
-async def fetch_conversation_history(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """Fetch the most recent conversation history for a session."""
-    try:
-        response = supabase.table("messages") \
-            .select("*") \
-            .eq("session_id", session_id) \
-            .order("created_at", desc=True) \
-            .limit(limit) \
-            .execute()
-        
-        # Convert to list and reverse to get chronological order
-        messages = response.data[::-1]
-        return messages
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch conversation history: {str(e)}")
+# Remove fetch_conversation_history and store_message functions (moved to supabase_utils.py)
 
-async def store_message(session_id: str, message_type: str, content: str, data: Optional[Dict] = None):
-    """Store a message in the Supabase messages table."""
-    message_obj = {
-        "type": message_type,
-        "content": content
-    }
-    if data:
-        message_obj["data"] = data
-
-    try:
-        supabase.table("messages").insert({
-            "session_id": session_id,
-            "message": message_obj
-        }).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to store message: {str(e)}")
+# Include the Slack router
+app.include_router(slack_router)
 
 @app.post("/api/mcp-agent-army", response_model=AgentResponse)
 async def mcp_agent_army(
@@ -166,8 +144,11 @@ async def mcp_agent_army(
         )
         print(f"User query stored. Running primary agent...") # ADDED DEBUG LOG
 
+        # Get agent from app state
+        agent = request.app.state.primary_agent
+
         # Run the agent with conversation history
-        result = await primary_agent.run(
+        result = await agent.run(
             request.query,
             message_history=messages
         )
