@@ -73,30 +73,32 @@ def get_model():
 
 # Airtable MCP server
 airtable_server = MCPServerStdio(
-    'npx', ['-y', 'airtable-mcp-server'],
+    'npx', ['airtable-mcp-server'], # Removed -y, package name is arg
     env={"AIRTABLE_API_KEY": os.getenv("AIRTABLE_API_KEY")}
 )
 
 # Brave Search MCP server
 brave_server = MCPServerStdio(
-    'npx', ['-y', '@modelcontextprotocol/server-brave-search'],
+    'npx', ['@modelcontextprotocol/server-brave-search'], # Removed -y
     env={"BRAVE_API_KEY": os.getenv("BRAVE_API_KEY")}
 )
 
 # Filesystem MCP server
+# Note: LOCAL_FILE_DIR needs to be valid within the container
 filesystem_server = MCPServerStdio(
-    'npx', ['-y', '@modelcontextprotocol/server-filesystem', os.getenv("LOCAL_FILE_DIR")]
+    'npx', ['@modelcontextprotocol/server-filesystem', os.getenv("LOCAL_FILE_DIR", "/app/local_files")], # Removed -y, added default dir
+    env={} # No specific env needed for filesystem server itself
 )
 
 # GitHub MCP server
 github_server = MCPServerStdio(
-    'npx', ['-y', '@modelcontextprotocol/server-github'],
+    'npx', ['@modelcontextprotocol/server-github'], # Removed -y
     env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_TOKEN")}
 )
 
 # Slack MCP server
 slack_server = MCPServerStdio(
-    'npx', ['-y', '@modelcontextprotocol/server-slack'],
+    'npx', ['@modelcontextprotocol/server-slack'], # Removed -y
     env={
         "SLACK_BOT_TOKEN": os.getenv("SLACK_BOT_TOKEN"),
         "SLACK_TEAM_ID": os.getenv("SLACK_TEAM_ID")
@@ -105,7 +107,7 @@ slack_server = MCPServerStdio(
 
 # Firecrawl MCP server
 firecrawl_server = MCPServerStdio(
-    'npx', ['-y', 'firecrawl-mcp'],
+    'npx', ['firecrawl-mcp'], # Removed -y
     env={"FIRECRAWL_API_KEY": os.getenv("FIRECRAWL_API_KEY")}
 )
 
