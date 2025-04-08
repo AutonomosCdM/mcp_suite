@@ -1,4 +1,4 @@
-FROM ottomator/base-python:latest
+FROM python:3.11-slim
 
 # Build argument for port with default value
 ARG PORT=8001
