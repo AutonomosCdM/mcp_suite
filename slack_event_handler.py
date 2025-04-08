@@ -15,9 +15,10 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 
 router = APIRouter()
 
-# Load secrets from environment
+# Load secrets and bot user ID from environment
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+SLACK_BOT_USER_ID = os.getenv("SLACK_BOT_USER_ID") # Added Bot User ID
 
 if not SLACK_SIGNING_SECRET or not SLACK_BOT_TOKEN:
     print("Warning: SLACK_SIGNING_SECRET or SLACK_BOT_TOKEN environment variables not set.")
@@ -176,8 +177,14 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks): # A
     if payload.get("type") == "event_callback":
         event = payload.get("event", {})
         event_type = event.get("type")
-        # Ignore messages from bots or message edits/deletions etc.
-        if event_type == "message" and "subtype" not in event and event.get("user"):
+
+        # Ignore messages from bots (including self), edits, deletions etc.
+        if (
+            event_type == "message"
+            and "subtype" not in event
+            and event.get("user")
+            and event.get("user") != SLACK_BOT_USER_ID # Check against bot user ID
+        ):
             user_id = event.get("user")
             text = event.get("text", "").strip()
             channel = event.get("channel")
