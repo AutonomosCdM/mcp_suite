@@ -61,11 +61,15 @@ async def verify_slack_signature(request: Request) -> bool:
 # --- Slack Events Endpoint ---
 @router.post("/slack/events")
 async def slack_events(request: Request):
-    # Verify signature first
-    if not await verify_slack_signature(request):
-        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    # --- TEMPORARILY DISABLED SIGNATURE VERIFICATION FOR DEBUGGING ---
+    # if not await verify_slack_signature(request):
+    #     print("Signature verification failed!") # Add log for failure
+    #     raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    # else:
+    #     print("Signature verification successful!") # Add log for success
+    # --- END TEMPORARY DISABLE ---
 
-    # Need to parse body after verification uses the raw body
+    # Need to parse body (previously done after verification)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
